@@ -1,0 +1,5 @@
+Using device: cpu
+Vocab size: 9
+Loaded 20000 sequences from data/processed/pretrain_sequences_small.csv
+
+Starting pretraining for 5 epochs
