@@ -323,45 +323,36 @@ def fig3_within_between_boxplot(embeddings, genes, out):
     """Within-locus vs between-locus cosine distance boxplot."""
     from scipy.spatial.distance import cosine as cos_dist
 
-    unique_loci = sorted(set(genes))
-    within_dists = []
-    between_dists = []
-
-    # Sample pairwise distances (full computation for within, subsample for between)
     N = len(embeddings)
-    gene_arr = np.array(genes)
 
-    for i in range(N):
-        for j in range(i + 1, min(i + 50, N)):  # limit pairs for speed
-            d = cos_dist(embeddings[i], embeddings[j])
-            if genes[i] == genes[j]:
-                within_dists.append(d)
-            else:
-                between_dists.append(d)
-
-    # Also do exhaustive within-locus (usually fewer pairs)
-    within_dists_full = []
+    # Exhaustive within-locus
+    within_dists = []
+    unique_loci = sorted(set(genes))
+    within_by_locus = {l: [] for l in unique_loci}
     for locus in unique_loci:
         idx = [i for i, g in enumerate(genes) if g == locus]
         for i in range(len(idx)):
             for j in range(i + 1, len(idx)):
                 d = cos_dist(embeddings[idx[i]], embeddings[idx[j]])
-                within_dists_full.append(d)
+                within_dists.append(d)
+                within_by_locus[locus].append(d)
 
-    # Subsample between-locus for balanced comparison
+    # Exhaustive between-locus (subsample if huge)
+    between_pairs = [(i, j) for i in range(N) for j in range(i+1, N) if genes[i] != genes[j]]
     np.random.seed(42)
-    between_idx = [(i, j) for i in range(N) for j in range(i+1, N) if genes[i] != genes[j]]
-    if len(between_idx) > 3000:
-        between_idx = [between_idx[k] for k in np.random.choice(len(between_idx), 3000, replace=False)]
-    between_dists_full = [cos_dist(embeddings[i], embeddings[j]) for i, j in between_idx]
+    if len(between_pairs) > 5000:
+        between_pairs = [between_pairs[k] for k in np.random.choice(len(between_pairs), 5000, replace=False)]
+    between_dists = [cos_dist(embeddings[i], embeddings[j]) for i, j in between_pairs]
+
+    if not within_dists or not between_dists:
+        log.warning("  Not enough pairs for boxplot")
+        return 0, 0, 0
 
     fig, ax = plt.subplots(figsize=(7, 7))
 
-    # Boxplots
-    bp = ax.boxplot([within_dists_full, between_dists_full],
+    bp = ax.boxplot([within_dists, between_dists],
                     positions=[0, 1], widths=0.5, showfliers=False,
                     patch_artist=True,
-                    boxprops=dict(linewidth=1.5),
                     medianprops=dict(color="red", linewidth=2.5),
                     whiskerprops=dict(linewidth=1.5),
                     capprops=dict(linewidth=1.5))
@@ -371,30 +362,41 @@ def fig3_within_between_boxplot(embeddings, genes, out):
     bp["boxes"][1].set_facecolor("#fdae6b")
     bp["boxes"][1].set_edgecolor("#e6550d")
 
-    # Overlay individual points with jitter
-    for idx, (data, color, xpos) in enumerate([
-        (within_dists_full, "#31a354", 0),
-        (between_dists_full, "#e6550d", 1),
-    ]):
-        jitter = np.random.normal(0, 0.06, len(data))
-        ax.scatter(np.full(len(data), xpos) + jitter, data,
-                   c=color, s=8, alpha=0.15, edgecolors="none", zorder=2)
+    # Jittered points
+    for data, color, xpos in [
+        (within_dists, "#31a354", 0),
+        (between_dists, "#e6550d", 1),
+    ]:
+        n_pts = len(data)
+        alpha = max(0.08, min(0.5, 200 / max(n_pts, 1)))
+        jitter = np.random.normal(0, 0.06, n_pts)
+        ax.scatter(np.full(n_pts, xpos) + jitter, data,
+                   c=color, s=10, alpha=alpha, edgecolors="none", zorder=2)
 
-    # Stats annotations
-    w_med = np.median(within_dists_full)
-    b_med = np.median(between_dists_full)
-    ax.text(0, w_med + 0.01, f"median = {w_med:.3f}",
-            ha="center", va="bottom", fontsize=11, fontweight="bold", color="#31a354")
-    ax.text(1, b_med + 0.01, f"median = {b_med:.3f}",
-            ha="center", va="bottom", fontsize=11, fontweight="bold", color="#e6550d")
-
-    # Separation ratio
+    w_med = np.median(within_dists)
+    b_med = np.median(between_dists)
     ratio = b_med / max(w_med, 1e-8)
-    ax.text(0.5, ax.get_ylim()[1] * 0.92,
-            f"Between/Within ratio: {ratio:.1f}×",
-            ha="center", fontsize=13, fontweight="bold",
-            bbox=dict(boxstyle="round,pad=0.4", facecolor="#fff3cd",
-                      edgecolor="#ffc107", alpha=0.9))
+
+    ax.text(0, max(within_dists) * 1.02, f"median = {w_med:.4f}\nn = {len(within_dists)}",
+            ha="center", va="bottom", fontsize=10, fontweight="bold", color="#31a354")
+    ax.text(1, max(between_dists) * 1.02, f"median = {b_med:.4f}\nn = {len(between_dists)}",
+            ha="center", va="bottom", fontsize=10, fontweight="bold", color="#e6550d")
+
+    # Statistical test
+    from scipy.stats import mannwhitneyu
+    try:
+        stat, pval = mannwhitneyu(within_dists, between_dists, alternative="less")
+        sig = "***" if pval < 0.001 else "**" if pval < 0.01 else "*" if pval < 0.05 else "n.s."
+        ax.text(0.5, ax.get_ylim()[1] * 0.95 if ax.get_ylim()[1] > 0 else 0.35,
+                f"Between/Within: {ratio:.2f}×  |  Mann-Whitney p = {pval:.2e} {sig}",
+                ha="center", fontsize=12, fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.4", facecolor="#fff3cd",
+                          edgecolor="#ffc107", alpha=0.9))
+    except Exception:
+        ax.text(0.5, 0.35, f"Between/Within ratio: {ratio:.2f}×",
+                ha="center", fontsize=12, fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.4", facecolor="#fff3cd",
+                          edgecolor="#ffc107", alpha=0.9))
 
     ax.set_xticks([0, 1])
     ax.set_xticklabels(["Within-locus\n(same gene)", "Between-locus\n(different genes)"],
@@ -495,6 +497,81 @@ def fig4_cosine_vs_genomic(embeddings, candidates, out):
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════
 
+def deduplicate_by_context(candidates):
+    """Deduplicate candidates sharing identical context sequences, keep one per unique context per gene."""
+    seen = {}
+    deduped = []
+    for c in candidates:
+        key = (c.gene, c.context_seq)
+        if key not in seen:
+            seen[key] = c
+            deduped.append(c)
+    return deduped
+
+
+def best_per_pam_per_snp(candidates):
+    """Keep one candidate per unique PAM site per SNP — removes spacer-length redundancy."""
+    seen = {}
+    result = []
+    for c in candidates:
+        # Unique key: gene + SNP + PAM genomic position + strand
+        pam_pos = c.name.split("_")[-1] if not c.name.endswith("_m") else c.name.split("_")[-2]
+        key = (c.gene, c.snp_mutation, c.strand, c.pam_seq, pam_pos)
+        if key not in seen:
+            seen[key] = c
+            result.append(c)
+    return result
+
+
+def best_per_snp(candidates):
+    """Keep single best candidate per SNP target (the actual assay panel)."""
+    best = {}
+    for c in candidates:
+        key = (c.gene, c.snp_mutation)
+        if key not in best or len(c.spacer) > len(best[key].spacer):
+            best[key] = c
+    return list(best.values())
+
+
+def run_figures_for_set(name, candidates_subset, embedder, out_subdir):
+    """Generate all 4 figures for a given candidate set."""
+    out_subdir.mkdir(parents=True, exist_ok=True)
+
+    genes = [c.gene for c in candidates_subset]
+    sequences = [c.context_seq for c in candidates_subset]
+    embeddings = embedder.embed(sequences)
+
+    n_rpoB = sum(1 for g in genes if g == "rpoB")
+    n_katG = sum(1 for g in genes if g == "katG")
+    n_inhA = sum(1 for g in genes if g == "inhA")
+    log.info("  [%s] %d candidates: rpoB=%d, katG=%d, inhA=%d",
+             name, len(candidates_subset), n_rpoB, n_katG, n_inhA)
+
+    # Only generate dimensionality reduction if enough points
+    if len(candidates_subset) >= 10:
+        fig1_tsne(embeddings, genes, out_subdir)
+        fig2_umap(embeddings, genes, out_subdir)
+    elif len(candidates_subset) >= 3:
+        fig1_tsne(embeddings, genes, out_subdir)
+        log.info("  Skipping UMAP (too few points for meaningful UMAP)")
+
+    if len(candidates_subset) >= 6:
+        w_med, b_med, ratio = fig3_within_between_boxplot(embeddings, genes, out_subdir)
+        log.info("    Within: %.4f, Between: %.4f, Ratio: %.1f×", w_med, b_med, ratio)
+    else:
+        log.info("  Skipping boxplot (too few points)")
+        w_med, b_med, ratio = 0, 0, 0
+
+    if len(candidates_subset) >= 10:
+        rho = fig4_cosine_vs_genomic(embeddings, candidates_subset, out_subdir)
+        log.info("    Genomic-embedding ρ: %.3f", rho)
+    else:
+        rho = 0
+
+    return {"n": len(candidates_subset), "w_med": w_med, "b_med": b_med,
+            "ratio": ratio, "rho": rho}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--genome", required=True)
@@ -512,41 +589,42 @@ def main():
     log.info("  %s bp, GC=%.1f%%", f"{len(genome):,}",
              100 * sum(1 for b in genome if b in "GC") / len(genome))
 
-    # Generate candidates
+    # Generate ALL candidates
     log.info("Generating crRNA candidates...")
-    candidates = find_crrna_candidates(genome, MDR_TB_TARGETS)
-    genes = [c.gene for c in candidates]
-    log.info("  %d candidates: rpoB=%d, katG=%d, inhA=%d",
-             len(candidates),
-             sum(1 for g in genes if g == "rpoB"),
-             sum(1 for g in genes if g == "katG"),
-             sum(1 for g in genes if g == "inhA"))
+    all_candidates = find_crrna_candidates(genome, MDR_TB_TARGETS)
+    log.info("  Total raw: %d", len(all_candidates))
 
-    # Embed with JEPA
-    log.info("Embedding with JEPA...")
+    # Load embedder once
+    log.info("Loading JEPA...")
     embedder = JEPAEmbedder(args.checkpoint)
-    sequences = [c.context_seq for c in candidates]
-    embeddings = embedder.embed(sequences)
-    log.info("  Embeddings: %s", embeddings.shape)
 
-    # Generate figures
-    log.info("\nGenerating interview figures...")
-    fig1_tsne(embeddings, genes, out)
-    fig2_umap(embeddings, genes, out)
-    w_med, b_med, ratio = fig3_within_between_boxplot(embeddings, genes, out)
-    rho = fig4_cosine_vs_genomic(embeddings, candidates, out)
+    # === Three filtering levels ===
+    levels = {
+        "A_best_per_snp": best_per_snp(all_candidates),
+        "B_best_per_pam": best_per_pam_per_snp(all_candidates),
+        "C_unique_context": deduplicate_by_context(all_candidates),
+    }
+
+    results = {}
+    for level_name, subset in levels.items():
+        log.info("\n" + "=" * 60)
+        log.info("  Level: %s", level_name)
+        log.info("=" * 60)
+        r = run_figures_for_set(level_name, subset, embedder, out / level_name)
+        results[level_name] = r
 
     # Summary
     log.info("\n" + "=" * 60)
-    log.info("  INTERVIEW FIGURES COMPLETE")
+    log.info("  COMPARISON ACROSS FILTERING LEVELS")
     log.info("=" * 60)
-    log.info("  Within-locus median distance:  %.4f", w_med)
-    log.info("  Between-locus median distance: %.4f", b_med)
-    log.info("  Separation ratio:              %.1f×", ratio)
-    log.info("  Genomic-embedding correlation:  ρ=%.3f", rho)
+    log.info("  %-25s %6s %8s %8s %6s %8s",
+             "Level", "N", "Within", "Between", "Ratio", "Geo ρ")
+    for name, r in results.items():
+        log.info("  %-25s %6d %8.4f %8.4f %5.1f× %8.3f",
+                 name, r["n"], r["w_med"], r["b_med"], r["ratio"], r["rho"])
     log.info("")
-    for f in sorted(out.glob("fig*.png")):
-        log.info("  %s (%.0f KB)", f.name, f.stat().st_size / 1024)
+    for f in sorted(out.rglob("fig*.png")):
+        log.info("  %s (%.0f KB)", f.relative_to(out), f.stat().st_size / 1024)
 
 
 if __name__ == "__main__":
