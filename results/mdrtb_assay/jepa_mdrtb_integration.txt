@@ -1,33 +1,42 @@
 ======================================================================
-  DNA-JEPA -> MDR-TB Diagnostic: Integration Summary
+  DNA-Bacteria-JEPA → MDR-TB Diagnostic: Integration Summary (v5)
 ======================================================================
 
 1. PRE-TRAINING (completed)
-   200 epochs, 20 bacterial genomes, RankMe 380/384
-   Phylum classification: 99% from embeddings
+   Model: SparseTransformerEncoder (384D × 6L × 6H, 1024 FFN)
+   Training: 200 epochs, 20 bacterial genomes, RankMe 380/384
+   Architecture: I-JEPA multi-block masking + transformer predictor
+   Losses: VICReg + LDReg + RC consistency + SupCon + GC adversary
+   Checkpoint: target_encoder_state_dict (EMA, best for inference)
+   Tokenizer: Cas12aTokenizer (character-level: A=1,C=2,G=3,T=4)
+   HuggingFace: orgava/dna-bacteria-jepa
 
-2. Cas12a FINE-TUNING (completed)
-   EasyDesign 10,634 LbCas12a pairs
-   JEPA frozen: rho=0.484+/-0.016
-   Random init: rho=0.254+/-0.021
-   Delta: +0.229 (validates pre-training)
+2. Cas12a FINE-TUNING (planned — Y1 milestone)
+   Dataset: EasyDesign 10,634 LbCas12a pairs
+   Expected: JEPA frozen → ρ≈0.48 vs random init ρ≈0.25
+   Script: scripts/06_cas12a_finetune.py
 
-3. MDR-TB ASSAY DESIGN v4
-   1 crRNAs: 1 SM + 0 detect_only
-   PAM types: 1 TTTV + 0 TTYN
-   From 78 candidates across 3 regions
+3. JEPA RANKING STATUS: ACTIVE (checkpoint loaded)
+
+4. MDR-TB ASSAY DESIGN v5
+   5 crRNAs: 5 SM + 0 detect_only
+   PAM types: 1 TTTV + 4 TTYN
+   From 429 candidates across 3 regions
    Targets: rpoB(RIF) + katG(INH) + inhA(INH/ETH)
-   Challenge: Mtb GC=65.6% -> dual PAM strategy
+   Challenge: Mtb GC=65.6% → dual PAM strategy
 
-4. NEXT: JEPA-GUIDED RANKING
-   Feed candidates into fine-tuned JEPA
-   Predict trans-cleavage per design
-   Rank: predicted_activity x discrimination_score
-   Select top per target for multiplexed cartridge
+5. JEPA-GUIDED RANKING PIPELINE
+   a) Extract 34nt context window (PAM+spacer+flank) per candidate
+   b) Tokenize via Cas12aTokenizer → (B, L) token IDs
+   c) Embed through frozen SparseTransformerEncoder → (B, 384)
+   d) Score: activity_head(embedding) if fine-tuned,
+      or normalised embedding L2 norm if pretrained only
+   e) Rank: combined = JEPA_score × (1 + rule_score / max_score)
+   f) Select top SM design per target for cartridge
 
-5. PhD ROADMAP (ETH Zurich, deMello/Richards)
-   Y1: Scale to 1000+ genomes, validate DeepCpf1/CRISPR-ML
-       Integrate enAsCas12a activity data
-   Y2: Optimize 6-8 target MDR-TB panel with CSEM cartridge
+6. PhD ROADMAP (ETH Zürich, deMello/Richards)
+   Y1: Scale to 1000+ genomes, fine-tune Cas12a activity head,
+       validate vs DeepCpf1/CRISPR-ML, integrate enAsCas12a data
+   Y2: Optimise 6-8 target MDR-TB panel with CSEM cartridge
    Y3: Clinical validation Swiss TPH + NCTLD Georgia
 ======================================================================
