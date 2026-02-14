@@ -1,0 +1,108 @@
+{
+  "n_candidates": 981,
+  "n_selected": 9,
+  "scoring_method": "0.5 * RC_consistency + 0.5 * centroid_proximity",
+  "selected_panel": [
+    {
+      "gene": "rpoB",
+      "snp": "S531L",
+      "spacer": "CCCACAAGCGCCGACTGATGGCG",
+      "pam": "TTGA",
+      "rc_consistency": 0.7436,
+      "centroid_proximity": 0.9402,
+      "enhanced_jepa": 0.545,
+      "rule_score": 6.5,
+      "combined_score": 0.7474
+    },
+    {
+      "gene": "rpoB",
+      "snp": "H526Y",
+      "spacer": "CATACAAGCGCCGACTGTCGGCG",
+      "pam": "TTGA",
+      "rc_consistency": 0.7436,
+      "centroid_proximity": 0.9402,
+      "enhanced_jepa": 0.545,
+      "rule_score": 17.5,
+      "combined_score": 1.09
+    },
+    {
+      "gene": "rpoB",
+      "snp": "H526D",
+      "spacer": "CAGACAAGCGCCGACTGTCGGCG",
+      "pam": "TTGA",
+      "rc_consistency": 0.7436,
+      "centroid_proximity": 0.9402,
+      "enhanced_jepa": 0.545,
+      "rule_score": 17.5,
+      "combined_score": 1.09
+    },
+    {
+      "gene": "rpoB",
+      "snp": "D516V",
+      "spacer": "TGATCCAGAACAACCCG",
+      "pam": "TTCA",
+      "rc_consistency": 0.834,
+      "centroid_proximity": 0.8739,
+      "enhanced_jepa": 0.7179,
+      "rule_score": 17.5,
+      "combined_score": 1.4358
+    },
+    {
+      "gene": "rpoB",
+      "snp": "L533P",
+      "spacer": "CCCACAAGCGCCGACTGTCGGCGAC",
+      "pam": "TTGA",
+      "rc_consistency": 0.703,
+      "centroid_proximity": 0.9405,
+      "enhanced_jepa": 0.4008,
+      "rule_score": 6.5,
+      "combined_score": 0.5497
+    },
+    {
+      "gene": "katG",
+      "snp": "S315T",
+      "spacer": "TCCATACGACCTCGATGCCAGTG",
+      "pam": "TTCG",
+      "rc_consistency": 0.7524,
+      "centroid_proximity": 0.9987,
+      "enhanced_jepa": 0.7079,
+      "rule_score": 6.5,
+      "combined_score": 0.9708
+    },
+    {
+      "gene": "katG",
+      "snp": "S315N",
+      "spacer": "TCCATACGACCTCGATGCCATTG",
+      "pam": "TTCG",
+      "rc_consistency": 0.7524,
+      "centroid_proximity": 0.9987,
+      "enhanced_jepa": 0.7079,
+      "rule_score": 6.5,
+      "combined_score": 0.9708
+    },
+    {
+      "gene": "inhA",
+      "snp": "c.-15C>T",
+      "spacer": "GGCCCGGCCGCGGCGAGTTGATA",
+      "pam": "TTTC",
+      "rc_consistency": 0.712,
+      "centroid_proximity": 0.9915,
+      "enhanced_jepa": 0.5479,
+      "rule_score": 6.5,
+      "combined_score": 0.7514
+    },
+    {
+      "gene": "inhA",
+      "snp": "c.-8T>C",
+      "spacer": "GTGGCTGTGGCAGTCACCCAGACAG",
+      "pam": "TTCA",
+      "rc_consistency": 0.6937,
+      "centroid_proximity": 0.7771,
+      "enhanced_jepa": 0.0,
+      "rule_score": 4.5,
+      "combined_score": 0.0
+    }
+  ],
+  "panel_diversity_min": 0.0,
+  "panel_diversity_mean": 0.2424
+}
