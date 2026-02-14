@@ -104,8 +104,8 @@ class CrRNA:
     spacer_len: int
 
 
-def find_crrna_candidates(genome, targets, spacer_lengths=None, max_distance=150):
-    """Find all crRNA candidates near each SNP."""
+def find_crrna_candidates(genome, targets, spacer_lengths=None, max_distance=150, context_window=500):
+    """Find all crRNA candidates near each SNP, with 500bp context windows."""
     if spacer_lengths is None:
         spacer_lengths = [17, 18, 20, 23, 25]
 
@@ -113,6 +113,12 @@ def find_crrna_candidates(genome, targets, spacer_lengths=None, max_distance=150
     for group_name, group in targets.items():
         for snp in group["snps"]:
             snp_pos = snp.genome_pos
+            # 500bp window centered on SNP
+            half = context_window // 2
+            ctx_start = max(0, snp_pos - 1 - half)
+            ctx_end = min(len(genome), snp_pos - 1 + half)
+            context_500bp = genome[ctx_start:ctx_end]
+
             for pam_mode in ["strict", "relaxed"]:
                 pat = PAM_PATTERNS[pam_mode]
                 search_start = max(0, snp_pos - 1 - max_distance - 30)
@@ -123,19 +129,16 @@ def find_crrna_candidates(genome, targets, spacer_lengths=None, max_distance=150
                     pam_gpos = search_start + m.start() + 1
                     pam_seq = region[m.start():m.start() + 4]
                     for sp_len in spacer_lengths:
-                        sp_start = pam_gpos + 3  # 0-indexed start after PAM
+                        sp_start = pam_gpos + 3
                         sp_end = sp_start + sp_len
                         if sp_end > len(genome): continue
-                        # Context = PAM + spacer + 5nt flanking
-                        ctx_start = pam_gpos - 1
-                        ctx_end = min(sp_end + 5, len(genome))
-                        context = genome[ctx_start:ctx_end]
                         spacer = genome[sp_start:sp_end]
                         candidates.append(CrRNA(
                             name=f"{snp.gene}_{snp.mutation}_sp{sp_len}_{pam_mode}_{pam_gpos}",
                             gene=snp.gene, snp_mutation=snp.mutation,
                             genome_pos=snp.genome_pos,
-                            context_seq=context, spacer=spacer,
+                            context_seq=context_500bp,  # 500bp window
+                            spacer=spacer,
                             strand="+", pam_seq=pam_seq, spacer_len=sp_len,
                         ))
 
@@ -146,15 +149,13 @@ def find_crrna_candidates(genome, targets, spacer_lengths=None, max_distance=150
                         sp_start_0 = sp_end_0 - sp_len + 1
                         if sp_start_0 < 0: continue
                         pam_seq_rc = reverse_complement(region[m.start():m.start() + 4])
-                        ctx_start = max(sp_start_0 - 5, 0)
-                        ctx_end = vaaa_gpos - 1 + 4
-                        context = reverse_complement(genome[ctx_start:min(ctx_end, len(genome))])
                         spacer = reverse_complement(genome[sp_start_0:sp_end_0 + 1])
                         candidates.append(CrRNA(
                             name=f"{snp.gene}_{snp.mutation}_sp{sp_len}_{pam_mode}_{vaaa_gpos}_m",
                             gene=snp.gene, snp_mutation=snp.mutation,
                             genome_pos=snp.genome_pos,
-                            context_seq=context, spacer=spacer,
+                            context_seq=context_500bp,  # 500bp window
+                            spacer=spacer,
                             strand="-", pam_seq=pam_seq_rc, spacer_len=sp_len,
                         ))
     return candidates
@@ -502,7 +503,7 @@ def deduplicate_by_context(candidates):
     seen = {}
     deduped = []
     for c in candidates:
-        key = (c.gene, c.context_seq)
+        key = (c.gene, c.context_seq[:50])  # first 50 chars enough to distinguish 500bp windows
         if key not in seen:
             seen[key] = c
             deduped.append(c)
@@ -514,9 +515,8 @@ def best_per_pam_per_snp(candidates):
     seen = {}
     result = []
     for c in candidates:
-        # Unique key: gene + SNP + PAM genomic position + strand
-        pam_pos = c.name.split("_")[-1] if not c.name.endswith("_m") else c.name.split("_")[-2]
-        key = (c.gene, c.snp_mutation, c.strand, c.pam_seq, pam_pos)
+        # With 500bp context, group by SNP + strand + PAM position
+        key = (c.gene, c.snp_mutation, c.strand, c.pam_seq)
         if key not in seen:
             seen[key] = c
             result.append(c)
