@@ -1,0 +1,33 @@
+======================================================================
+  DNA-JEPA -> MDR-TB Diagnostic: Integration Summary
+======================================================================
+
+1. PRE-TRAINING (completed)
+   200 epochs, 20 bacterial genomes, RankMe 380/384
+   Phylum classification: 99% from embeddings
+
+2. Cas12a FINE-TUNING (completed)
+   EasyDesign 10,634 LbCas12a pairs
+   JEPA frozen: rho=0.484+/-0.016
+   Random init: rho=0.254+/-0.021
+   Delta: +0.229 (validates pre-training)
+
+3. MDR-TB ASSAY DESIGN v4
+   1 crRNAs: 1 SM + 0 detect_only
+   PAM types: 1 TTTV + 0 TTYN
+   From 78 candidates across 3 regions
+   Targets: rpoB(RIF) + katG(INH) + inhA(INH/ETH)
+   Challenge: Mtb GC=65.6% -> dual PAM strategy
+
+4. NEXT: JEPA-GUIDED RANKING
+   Feed candidates into fine-tuned JEPA
+   Predict trans-cleavage per design
+   Rank: predicted_activity x discrimination_score
+   Select top per target for multiplexed cartridge
+
+5. PhD ROADMAP (ETH Zurich, deMello/Richards)
+   Y1: Scale to 1000+ genomes, validate DeepCpf1/CRISPR-ML
+       Integrate enAsCas12a activity data
+   Y2: Optimize 6-8 target MDR-TB panel with CSEM cartridge
+   Y3: Clinical validation Swiss TPH + NCTLD Georgia
+======================================================================

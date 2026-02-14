@@ -1,0 +1,114 @@
+{
+  "rpoB_RRDR": {
+    "description": "Rifampicin Resistance Determining Region",
+    "verification": {
+      "S531L": true,
+      "H526Y": true,
+      "H526D": true,
+      "D516V": true,
+      "L533P": true
+    },
+    "candidates_evaluated": {
+      "S531L": 0,
+      "H526Y": 0,
+      "H526D": 0,
+      "D516V": 0,
+      "L533P": 0
+    },
+    "crrnas": [],
+    "rpa_primers": {
+      "amplicon_size": 170,
+      "forward": {
+        "sequence": "CACCAGCCAGCTGAGCCAATTCATGGACCAG",
+        "position": 761084,
+        "length": 31,
+        "gc_content": 0.581
+      },
+      "reverse": {
+        "sequence": "GGGTTTCGATCGGGCACATCCGGCCGTAGTG",
+        "position": 761253,
+        "length": 31,
+        "gc_content": 0.645
+      }
+    }
+  },
+  "katG_315": {
+    "description": "katG codon 315 (catalase-peroxidase)",
+    "verification": {
+      "S315T": true,
+      "S315N": true
+    },
+    "candidates_evaluated": {
+      "S315T": 0,
+      "S315N": 0
+    },
+    "crrnas": [],
+    "rpa_primers": {
+      "amplicon_size": 120,
+      "forward": {
+        "sequence": "TTCGTCAGCTCCCACTCGTAGCCGTACAGG",
+        "position": 2155078,
+        "length": 30,
+        "gc_content": 0.6
+      },
+      "reverse": {
+        "sequence": "CACCGGAACCGGTAAGGACGCGATCACCAG",
+        "position": 2155197,
+        "length": 30,
+        "gc_content": 0.633
+      }
+    }
+  },
+  "inhA_promoter": {
+    "description": "fabG1-inhA promoter region",
+    "verification": {
+      "c.-15C>T": true,
+      "c.-8T>C": true
+    },
+    "candidates_evaluated": {
+      "c.-15C>T": 78,
+      "c.-8T>C": 0
+    },
+    "crrnas": [
+      {
+        "name": "inhA_promoter_c.-15C>T_sp23_SM17A",
+        "gene": "inhA_promoter",
+        "mutation": "c.-15C>T",
+        "drug": "Isoniazid/Ethionamide",
+        "genome_pos": 1673425,
+        "ref_allele": "C",
+        "alt_allele": "T",
+        "pam_seq": "TTTC",
+        "pam_strand": "+",
+        "pam_type": "strict",
+        "spacer_designed": "GGCCCGGCCGCGGCGAAATGATA",
+        "spacer_wt": "GGCCCGGCCGCGGCGAGACGATA",
+        "spacer_mut": "GGCCCGGCCGCGGCGAGATGATA",
+        "spacer_length": 23,
+        "snp_pos_in_spacer": 19,
+        "synthetic_mm_pos": 17,
+        "synthetic_mm_type": "G>A at pos 17",
+        "n_mm_vs_mutant": 1,
+        "n_mm_vs_wildtype": 2,
+        "gc_content": 0.696,
+        "design_type": "SM",
+        "score": 5.5
+      }
+    ],
+    "rpa_primers": {
+      "amplicon_size": 120,
+      "forward": {
+        "sequence": "TACGCTCGTGGACATACCGATTTCGGCCCG",
+        "position": 1673383,
+        "length": 30,
+        "gc_content": 0.6
+      },
+      "reverse": {
+        "sequence": "GGTAACCAGGACTGAACGGGATACGAATGG",
+        "position": 1673502,
+        "length": 30,
+        "gc_content": 0.533
+      }
+    }
+  }
+}
