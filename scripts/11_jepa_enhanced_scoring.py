@@ -384,6 +384,14 @@ class EnhancedJEPAScorer:
         """
         Embed sequences AND capture attention weights from all layers.
 
+        Uses a two-hook strategy:
+          1. forward_pre_hook: intercepts MultiheadAttention call to force
+             need_weights=True and average_attn_weights=False
+          2. forward_hook: captures the (attn_output, attn_weights) tuple
+
+        This works because TransformerEncoderLayer calls self_attn with
+        need_weights=False by default — we override it before execution.
+
         Returns:
             embeddings: (N, D) numpy
             attention_weights: list of (N, num_heads, L, L) numpy per layer
@@ -392,43 +400,35 @@ class EnhancedJEPAScorer:
         import torch.nn as nn
 
         tokens, mask = self._tokenize(sequences)
-
-        # Register hooks to capture attention weights
-        captured_attns = []
-        hooks = []
-
-        def make_hook(layer_idx):
-            def hook_fn(module, args, kwargs, output):
-                # MultiheadAttention output: (attn_output, attn_weights)
-                # But we need to force need_weights=True
-                pass
-            return hook_fn
-
-        # Monkey-patch MultiheadAttention to capture weights
-        original_forwards = {}
         layer_attns = {}
+        hooks = []
 
         for i in range(self.num_layers):
             attn_module = self.encoder.encoder.layers[i].self_attn
-            original_forwards[i] = attn_module.forward
 
-            def patched_forward(self_attn, *args, _layer_idx=i, _orig=attn_module.forward, **kwargs):
+            # Hook 1: Before forward — force need_weights=True
+            def pre_hook(module, args, kwargs, _idx=i):
                 kwargs['need_weights'] = True
-                kwargs['average_attn_weights'] = False  # (B, H, L, L)
-                out = _orig(*args, **kwargs)
-                if isinstance(out, tuple) and len(out) >= 2:
-                    layer_attns[_layer_idx] = out[1].detach().cpu().numpy()
-                return out
+                kwargs['average_attn_weights'] = False  # keep (B, H, L, L)
+                return args, kwargs
 
-            attn_module.forward = lambda *a, _pf=patched_forward, _am=attn_module, **kw: _pf(_am, *a, **kw)
+            # Hook 2: After forward — capture attention weights
+            def post_hook(module, args, kwargs, output, _idx=i):
+                # output = (attn_output, attn_weights) when need_weights=True
+                if isinstance(output, tuple) and len(output) >= 2 and output[1] is not None:
+                    layer_attns[_idx] = output[1].detach().cpu().numpy()
+
+            h1 = attn_module.register_forward_pre_hook(pre_hook, with_kwargs=True)
+            h2 = attn_module.register_forward_hook(post_hook, with_kwargs=True)
+            hooks.extend([h1, h2])
 
         # Forward pass
         with torch.no_grad():
             pooled, _info = self.encoder(tokens, attention_mask=mask)
 
-        # Restore original forwards
-        for i in range(self.num_layers):
-            self.encoder.encoder.layers[i].self_attn.forward = original_forwards[i]
+        # Remove all hooks
+        for h in hooks:
+            h.remove()
 
         # Collect attention weights
         attn_list = [layer_attns.get(i, np.zeros((len(sequences), self.num_heads, 1, 1)))
@@ -738,7 +738,12 @@ def fig_centroid_proximity(designs, embeddings, out):
 
 
 def fig_attention_maps(scorer, designs, out):
-    """Fig C: Attention heatmaps for the top crRNA per target."""
+    """Fig C: Attention heatmaps for the top crRNA per target.
+    
+    Two panels per crRNA:
+      Left:  Per-position attention bar chart (avg across all layers/heads)
+      Right: Layer × Position heatmap (avg across heads per layer)
+    """
     # Select top SM design per SNP
     best_per_snp = {}
     for d in designs:
@@ -757,78 +762,157 @@ def fig_attention_maps(scorer, designs, out):
     log.info("  Extracting attention maps for %d selected crRNAs...", len(selected))
     embeddings, attn_layers = scorer.embed_with_attention(sequences)
 
+    # Check if attention was actually captured
+    total_attn = sum(a.sum() for a in attn_layers)
+    if total_attn < 1e-6:
+        log.warning("  Attention weights are all zero — hooks may not have captured correctly")
+        log.warning("  Attempting manual extraction with direct MHA call...")
+        # Fallback: manually run through encoder layers calling MHA with need_weights
+        import torch
+        tokens, mask = scorer._tokenize(sequences)
+        
+        attn_layers_manual = []
+        with torch.no_grad():
+            # Get initial embeddings — try common attribute names
+            enc = scorer.encoder
+            if hasattr(enc, 'embedding'):
+                x = enc.embedding(tokens)
+            elif hasattr(enc, 'embed'):
+                x = enc.embed(tokens)
+            elif hasattr(enc, 'token_embedding'):
+                x = enc.token_embedding(tokens)
+            else:
+                # Try to find embedding layer
+                for name, mod in enc.named_modules():
+                    if 'embed' in name.lower() and isinstance(mod, torch.nn.Embedding):
+                        x = mod(tokens)
+                        break
+                else:
+                    log.warning("  Could not find embedding layer — skipping attention maps")
+                    return
+
+            # Apply positional encoding if exists
+            for attr in ['pos_encoder', 'pos_encoding', 'positional_encoding', 'pos_embed']:
+                if hasattr(enc, attr):
+                    x = getattr(enc, attr)(x)
+                    break
+            
+            for i in range(scorer.num_layers):
+                layer = enc.encoder.layers[i]
+                # Call self_attn directly with need_weights=True
+                attn_out, attn_weights = layer.self_attn(
+                    x, x, x, need_weights=True, average_attn_weights=False
+                )
+                if attn_weights is not None:
+                    attn_layers_manual.append(attn_weights.detach().cpu().numpy())
+                else:
+                    attn_layers_manual.append(
+                        np.zeros((len(sequences), scorer.num_heads, x.shape[1], x.shape[1])))
+                # Run through the rest of the layer (feedforward + norms)
+                x2 = layer.norm1(x + layer.dropout1(attn_out))
+                ff_out = layer.linear2(layer.dropout(layer.activation(layer.linear1(x2))))
+                x = layer.norm2(x2 + layer.dropout2(ff_out))
+        
+        attn_layers = attn_layers_manual
+        total_attn = sum(a.sum() for a in attn_layers)
+        log.info("  Manual extraction: total attention sum = %.2f", total_attn)
+
     n_designs = len(selected)
     n_layers = len(attn_layers)
 
-    # Average attention across heads for each layer, focus on CLS token (idx 0)
-    # or average across all query positions
-    fig, axes = plt.subplots(n_designs, 1, figsize=(16, 4 * n_designs))
+    fig, axes = plt.subplots(n_designs, 2, figsize=(20, 4 * n_designs),
+                             gridspec_kw={"width_ratios": [2, 1]})
     if n_designs == 1:
-        axes = [axes]
+        axes = axes.reshape(1, 2)
 
-    for idx, (d, ax) in enumerate(zip(selected, axes)):
+    for idx, d in enumerate(selected):
         seq = d.context_seq
         seq_len = len(seq)
 
-        # Average attention over all layers and heads, query=all positions, key=all positions
-        # Shape per layer: (B, H, L, L) → average over H → (B, L, L) → average over query → (B, L)
-        attn_per_pos = np.zeros(attn_layers[0].shape[-1])  # L
-        for layer_attn in attn_layers:
-            # layer_attn: (B, H, L, L)
+        # ── Compute per-position attention (avg over layers and heads) ──
+        attn_per_pos = np.zeros(attn_layers[0].shape[-1])
+        layer_pos_matrix = np.zeros((n_layers, attn_layers[0].shape[-1]))
+
+        for li, layer_attn in enumerate(attn_layers):
             a = layer_attn[idx]  # (H, L, L)
             a_mean = a.mean(axis=0)  # (L, L) — average over heads
-            a_col = a_mean.mean(axis=0)  # (L,) — average attention received per position
+            a_col = a_mean.mean(axis=0)  # (L,) — average attention received per key position
             attn_per_pos += a_col
+            layer_pos_matrix[li] = a_col
         attn_per_pos /= n_layers
 
-        # Trim to actual sequence length (tokens include CLS, SEP, padding)
-        # Token layout: [CLS, A, C, G, T, ..., SEP, PAD, PAD, ...]
-        actual_len = min(seq_len + 2, len(attn_per_pos))  # +2 for CLS, SEP
-        attn_trimmed = attn_per_pos[1:seq_len + 1]  # skip CLS, take seq_len tokens
+        # Trim to actual sequence positions (skip CLS at idx 0, take seq_len tokens)
+        trim_start = 1  # skip CLS
+        trim_end = min(trim_start + seq_len, len(attn_per_pos))
+        attn_trimmed = attn_per_pos[trim_start:trim_end]
+        layer_matrix_trimmed = layer_pos_matrix[:, trim_start:trim_end]
 
         if len(attn_trimmed) < seq_len:
             attn_trimmed = np.pad(attn_trimmed, (0, seq_len - len(attn_trimmed)))
+            layer_matrix_trimmed = np.pad(layer_matrix_trimmed,
+                                          ((0, 0), (0, seq_len - layer_matrix_trimmed.shape[1])))
 
-        # Normalize
         attn_trimmed = attn_trimmed[:seq_len]
+        layer_matrix_trimmed = layer_matrix_trimmed[:, :seq_len]
+
+        # Normalize bar chart
         if attn_trimmed.max() > 0:
             attn_norm = attn_trimmed / attn_trimmed.max()
         else:
             attn_norm = attn_trimmed
 
-        # Plot as bar chart with nucleotide labels
+        # ── Panel LEFT: Bar chart ──
+        ax = axes[idx, 0]
         colors = []
         for pos in range(seq_len):
-            nuc_pos = pos + 1  # 1-indexed position in context
             if pos < 4:
-                colors.append("#e6550d")  # PAM (first 4 nt)
+                colors.append("#e6550d")  # PAM
             elif d.synthetic_mm_pos > 0 and (pos - 4 + 1) == d.synthetic_mm_pos:
-                colors.append("#ff7f00")  # SM position
+                colors.append("#ff7f00")  # SM
             elif (pos - 4 + 1) == d.snp_pos_in_spacer:
-                colors.append("#e41a1c")  # SNP position
+                colors.append("#e41a1c")  # SNP
             elif 1 <= (pos - 4 + 1) <= 8:
-                colors.append("#a1d99b")  # Seed region
+                colors.append("#a1d99b")  # Seed
             else:
-                colors.append("#6baed6")  # Rest of spacer
+                colors.append("#6baed6")  # Spacer
 
-        bars = ax.bar(range(seq_len), attn_norm[:seq_len], color=colors, alpha=0.8,
-                       edgecolor="white", linewidth=0.5)
+        ax.bar(range(seq_len), attn_norm[:seq_len], color=colors, alpha=0.85,
+               edgecolor="white", linewidth=0.5)
 
-        # Add nucleotide labels
-        for pos in range(seq_len):
-            if pos < len(seq):
-                ax.text(pos, -0.08, seq[pos], ha="center", va="top",
-                       fontsize=6, fontfamily="monospace", fontweight="bold")
+        for pos in range(min(seq_len, len(seq))):
+            ax.text(pos, -0.08, seq[pos], ha="center", va="top",
+                    fontsize=7, fontfamily="monospace", fontweight="bold")
 
         gene = d.target_snp.gene
         snp_name = d.target_snp.mutation_ecoli
-        ax.set_ylabel("Attention\n(avg all layers)", fontsize=9)
+        ax.set_ylabel("Attention\n(avg 6L×6H)", fontsize=9)
         ax.set_title(f"{gene} {snp_name} — PAM={d.pam_seq} | SM@{d.synthetic_mm_pos} | "
-                     f"SNP@{d.snp_pos_in_spacer} | RC={d.rc_consistency:.3f} | "
-                     f"JEPA={d.jepa_enhanced_score:.3f}",
+                     f"SNP@{d.snp_pos_in_spacer} | JEPA={d.jepa_enhanced_score:.3f}",
                      fontsize=10, fontweight="bold", color=LOCUS_COLORS.get(gene, "#333"))
         ax.set_xlim(-0.5, seq_len - 0.5)
-        ax.set_ylim(-0.15, 1.1)
+        ax.set_ylim(-0.15, 1.15)
+
+        # ── Panel RIGHT: Layer × Position heatmap ──
+        ax2 = axes[idx, 1]
+        # Normalize per layer for visibility
+        lm = layer_matrix_trimmed.copy()
+        for li in range(n_layers):
+            row_max = lm[li].max()
+            if row_max > 0:
+                lm[li] /= row_max
+
+        im = ax2.imshow(lm, aspect="auto", cmap="inferno", interpolation="nearest")
+        ax2.set_yticks(range(n_layers))
+        ax2.set_yticklabels([f"L{i+1}" for i in range(n_layers)], fontsize=8)
+        ax2.set_xlabel("Sequence position", fontsize=9)
+        ax2.set_title("Layer × Position", fontsize=10, fontweight="bold")
+
+        # Mark PAM, seed, SNP, SM on x-axis
+        for pos in range(seq_len):
+            if pos < 4:
+                ax2.axvspan(pos - 0.5, pos + 0.5, alpha=0.15, color="#e6550d")
+            elif 1 <= (pos - 4 + 1) <= 8:
+                ax2.axvspan(pos - 0.5, pos + 0.5, alpha=0.08, color="#a1d99b")
 
     # Legend
     legend_elements = [
@@ -838,7 +922,7 @@ def fig_attention_maps(scorer, designs, out):
         Line2D([0], [0], color="#ff7f00", lw=8, label="Synth. MM"),
         Line2D([0], [0], color="#6baed6", lw=8, label="Spacer"),
     ]
-    axes[-1].legend(handles=legend_elements, loc="lower right", ncol=5, fontsize=8)
+    axes[-1, 0].legend(handles=legend_elements, loc="lower right", ncol=5, fontsize=8)
 
     fig.suptitle("DNA-JEPA Attention Maps — Per-Position Attention Weight\n"
                  "(averaged across 6 layers × 6 heads, 384D encoder)",
